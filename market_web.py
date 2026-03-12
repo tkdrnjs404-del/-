@@ -8,7 +8,7 @@ from pykrx import stock
 # 1. 페이지 설정
 st.set_page_config(page_title="Custom Market Dashboard", layout="wide")
 
-# CSS: 가독성 최우선 (숫자 흰색, 이름 민트색)
+# CSS: 갱신 표시 위치 변경 (오른쪽 -> 왼쪽)
 st.markdown("""
     <style>
     .main { background-color: #0e1117; }
@@ -35,11 +35,11 @@ st.markdown("""
         border: 1px solid #333;
     }
 
-    /* 우측 하단 동기화 표시 */
-    .bottom-right-text {
+    /* 하단 상태 표시 (왼쪽 하단으로 위치 이동) */
+    .bottom-status-text {
         position: fixed;
         bottom: 10px;
-        right: 15px;
+        left: 15px;  /* 기존 right에서 left로 변경 */
         font-size: 0.75rem;
         color: #888888;
         background-color: rgba(14, 17, 23, 0.7);
@@ -63,7 +63,7 @@ def is_market_open():
     if now.weekday() >= 5: return False
     return now.replace(hour=9, minute=0) <= now <= now.replace(hour=15, minute=40)
 
-# 티커 구성 (나스닥 종합지수 최상단)
+# 티커 구성
 yahoo_tickers = {
     "해외 지수 및 환율": {
         "나스닥 종합지수": "^IXIC",
@@ -142,10 +142,10 @@ while True:
                 except:
                     cols[idx % 3].metric(label=name, value="연결 중")
 
-    # --- 하단 상태 바 ---
+    # --- 하단 상태 바 (왼쪽 배치) ---
     now_str = get_kst_now().strftime('%Y-%m-%d %H:%M:%S')
     m_status = "🟢 실시간" if is_market_open() else "⚪ 장외"
-    status_area.markdown(f"<div class='bottom-right-text'>{m_status} 갱신: {now_str} KST</div>", unsafe_allow_html=True)
+    status_area.markdown(f"<div class='bottom-status-text'>{m_status} 갱신: {now_str} KST</div>", unsafe_allow_html=True)
     
     time.sleep(5)
     st.rerun()
