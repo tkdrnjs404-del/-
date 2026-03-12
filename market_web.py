@@ -3,9 +3,10 @@ import yfinance as yf
 import pandas as pd
 from datetime import datetime
 import time
+from pykrx import stock # 네이버 시세 기반 라이브러리
 
-# 1. 페이지 설정 및 다크 테마 디자인
-st.set_page_config(page_title="Real-time Dashboard", layout="wide")
+# 1. 페이지 설정 및 디자인
+st.set_page_config(page_title="Real-time Pro Dashboard", layout="wide")
 
 st.markdown("""
     <style>
@@ -14,9 +15,6 @@ st.markdown("""
         color: #FFFFFF !important;
         font-size: 2.2rem !important;
         font-weight: 700;
-    }
-    [data-testid="stMetricLabel"] {
-        color: #AAAAAA !important;
     }
     div[data-testid="stMetric"] {
         background-color: #1c1f26;
@@ -27,61 +25,68 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-st.title("⚡ 실시간 시장 대시보드")
+st.title("📈 네이버급 실시간 시장 대시보드")
 
 container = st.container()
 st.divider()
 status_area = st.empty() 
 
-# 티커 설정: 코스닥 150 심볼을 ^KQ150으로 변경하여 호환성 높임
-tickers = {
-    "국내 지수 (대표 200/150)": {
-        "코스피 200": "^KS200", 
-        "코스닥 150": "^KQ150", # 이 부분이 수정되었습니다
-        "원/달러 환율": "KRW=X"
-    },
-    "해외 지수": {
-        "나스닥": "^IXIC", 
-        "나스닥 100 선물": "NQ=F", 
-        "S&P 500": "^GSPC"
-    },
-    "원자재": {
-        "WTI 원유": "CL=F", 
-        "금 (Gold)": "GC=F", 
-        "비트코인 (BTC)": "BTC-USD"
-    }
-}
+def get_domestic_data():
+    """국내 지수를 실시간에 가깝게 가져오는 함수"""
+    try:
+        now = datetime.now().strftime("%Y%m%d")
+        # 코스피(1001), 코스닥(2001) 실시간 시세
+        df_kospi = stock.get_index_status_by_date(now, now, "KOSPI")
+        df_kosdaq = stock.get_index_status_by_date(now, now, "KOSDAQ")
+        
+        return {
+            "KOSPI": float(df_kospi['종가'].iloc[-1]),
+            "KOSPI_DIFF": float(df_kospi['대비'].iloc[-1]),
+            "KOSPI_RATE": float(df_kospi['등락률'].iloc[-1]),
+            "KOSDAQ": float(df_kosdaq['종가'].iloc[-1]),
+            "KOSDAQ_DIFF": float(df_kosdaq['대비'].iloc[-1]),
+            "KOSDAQ_RATE": float(df_kosdaq['등락률'].iloc[-1]),
+        }
+    except:
+        return None
 
 while True:
     with container:
-        for category, items in tickers.items():
-            st.subheader(f"📍 {category}")
-            cols = st.columns(3)
-            for idx, (name, sym) in enumerate(items.items()):
-                try:
-                    # 개별 티커별로 최신 데이터를 가져와서 오류 최소화
-                    t = yf.Ticker(sym)
-                    df = t.history(period="2d", interval="1m")
-                    
-                    if not df.empty:
-                        current_price = df['Close'].iloc[-1]
-                        prev_close = df['Close'].iloc[0] # 전일 혹은 시작가 대비
-                        
-                        delta = current_price - prev_close
-                        delta_pct = (delta / prev_close) * 100
-                        
-                        cols[idx % 3].metric(
-                            label=name, 
-                            value=f"{current_price:,.2f}", 
-                            delta=f"{delta:,.2f} ({delta_pct:.2f}%)"
-                        )
-                    else:
-                        cols[idx % 3].metric(label=name, value="휴장 또는 점검")
-                except:
-                    cols[idx % 3].metric(label=name, value="연결 재시도 중")
+        # 국내 데이터 호출 (네이버 기반)
+        kr_data = get_domestic_data()
         
-    now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-    status_area.markdown(f"<p style='text-align: center; color: #666;'>🔄 5초 주기 자동 동기화 중... (마지막 갱신: {now})</p>", unsafe_allow_html=True)
+        # 해외/환율 데이터 호출 (야후 기반)
+        foreign_symbols = ["KRW=X", "NQ=F", "CL=F", "GC=F", "BTC-USD", "^IXIC"]
+        f_data = yf.download(foreign_symbols, period="2d", interval="1m", progress=False)['Close']
+
+        # --- 📍 국내 주요 지수 ---
+        st.subheader("📍 국내 주요 지수 (네이버 기반)")
+        cols1 = st.columns(3)
+        if kr_data:
+            cols1[0].metric("코스피 (KOSPI)", f"{kr_data['KOSPI']:,.2f}", f"{kr_data['KOSPI_DIFF']:,.2f} ({kr_data['KOSPI_RATE']:.2f}%)")
+            cols1[1].metric("코스닥 (KOSDAQ)", f"{kr_data['KOSDAQ']:,.2f}", f"{kr_data['KOSDAQ_DIFF']:,.2f} ({kr_data['KOSDAQ_RATE']:.2f}%)")
+        
+        # 환율은 야후에서 가져옴
+        try:
+            ex_rate = f_data['KRW=X'].dropna().iloc[-1]
+            cols1[2].metric("원/달러 환율", f"{ex_rate:,.2f}", "")
+        except: pass
+
+        # --- 📍 미국 시장 및 원자재 ---
+        st.subheader("📍 미국 시장 및 원자재")
+        cols2 = st.columns(3)
+        try:
+            nasdaq = f_data['NQ=F'].dropna().iloc[-1]
+            wti = f_data['CL=F'].dropna().iloc[-1]
+            gold = f_data['GC=F'].dropna().iloc[-1]
+            
+            cols2[0].metric("나스닥 100 선물", f"{nasdaq:,.2f}", "")
+            cols2[1].metric("WTI 원유 선물", f"{wti:,.2f}", "")
+            cols2[2].metric("금 (Gold)", f"{gold:,.2f}", "")
+        except: pass
+        
+    now_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    status_area.markdown(f"<p style='text-align: center; color: #666;'>🔄 네이버 시세 동기화 중... (마지막 갱신: {now_time})</p>", unsafe_allow_html=True)
     
     time.sleep(5)
     st.rerun()
