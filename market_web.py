@@ -8,15 +8,31 @@ from pykrx import stock
 # 1. 페이지 설정
 st.set_page_config(page_title="Custom Market Dashboard", layout="wide")
 
-# CSS: 등락폭 표시 및 가격 변동 애니메이션 효과
+# CSS: 가독성 개선 (텍스트 선명도 강화)
 st.markdown("""
     <style>
     .main { background-color: #0e1117; }
     
-    /* 지수 이름 색상 (민트/청록) */
+    /* 1. 지수 숫자 - 완전한 흰색으로 선명하게 고정 */
+    [data-testid="stMetricValue"] {
+        color: #FFFFFF !important;
+        font-size: 2.2rem !important;
+        font-weight: 700;
+        opacity: 1.0 !important;
+    }
+    
+    /* 2. 지수 이름 - 선명한 민트색 */
     [data-testid="stMetricLabel"] {
         color: #4FD1C5 !important;
         font-weight: 600 !important;
+        font-size: 1rem !important;
+        opacity: 1.0 !important;
+    }
+
+    /* 3. 등락폭 글자 크기 조정 */
+    [data-testid="stMetricDelta"] {
+        font-weight: 500 !important;
+        font-size: 0.9rem !important;
     }
     
     /* 카드 디자인 */
@@ -25,17 +41,15 @@ st.markdown("""
         padding: 20px;
         border-radius: 12px;
         border: 1px solid #333;
-        transition: background-color 0.5s ease;
     }
 
-    /* 우측 하단 고정 텍스트 */
     .bottom-right-text {
         position: fixed;
         bottom: 10px;
         right: 15px;
         font-size: 0.75rem;
-        color: #888888;
-        background-color: rgba(14, 17, 23, 0.7);
+        color: #FFFFFF;
+        background-color: rgba(0, 0, 0, 0.7);
         padding: 6px 12px;
         border-radius: 6px;
         z-index: 1000;
@@ -56,7 +70,6 @@ def is_market_open():
     if now.weekday() >= 5: return False
     return now.replace(hour=9, minute=0) <= now <= now.replace(hour=15, minute=40)
 
-# 티커 구성 (나스닥 종합지수 최상단)
 yahoo_tickers = {
     "해외 지수 및 환율": {
         "나스닥 종합지수": "^IXIC",
@@ -91,24 +104,29 @@ while True:
             
         if not kr_success:
             try:
-                kr_fb = yf.download(["^KS11", "^KQ11"], period="2d", progress=False)['Close']
+                # 안전하게 7일치 데이터를 가져와 마지막 2거래일 비교
+                kr_fb = yf.download(["^KS11", "^KQ11"], period="7d", interval="1d", progress=False)['Close']
                 for i, sym in enumerate(["^KS11", "^KQ11"]):
-                    val = kr_fb[sym].iloc[-1]
-                    diff = val - kr_fb[sym].iloc[-2]
-                    rate = (diff / kr_fb[sym].iloc[-2]) * 100
+                    clean_data = kr_fb[sym].dropna()
+                    val = clean_data.iloc[-1]
+                    prev_val = clean_data.iloc[-2]
+                    diff = val - prev_val
+                    rate = (diff / prev_val) * 100
                     name = "코스피 (KOSPI)" if i==0 else "코스닥 (KOSDAQ)"
                     cols1[i].metric(name, f"{val:,.2f}", f"{diff:,.2f} ({rate:.2f}%)")
             except: pass
 
-        # --- 2. 해외 및 원자재 (등락폭 계산 추가) ---
+        # --- 2. 해외 및 원자재 (등락폭 nan 오류 수정) ---
         all_syms = [s for g in yahoo_tickers.values() for s in g.values()]
-        # 전일 대비 등락 계산을 위해 period를 2d로 설정
-        y_data = yf.download(all_syms, period="2d", interval="1m", progress=False)['Close']
+        # 등락 계산을 위해 7일치 데이터를 미리 확보 (nan 방지)
+        y_data = yf.download(all_syms, period="7d", interval="1d", progress=False)['Close']
+        # 실시간 가격용 (마지막 1분 데이터)
+        y_live = yf.download(all_syms, period="1d", interval="1m", progress=False)['Close']
 
         # 환율 표시
         try:
-            ex_now = y_data['KRW=X'].dropna().iloc[-1]
-            ex_prev = y_data['KRW=X'].dropna().iloc[0] # 전일 종가 혹은 첫 데이터
+            ex_now = y_live['KRW=X'].dropna().iloc[-1]
+            ex_prev = y_data['KRW=X'].dropna().iloc[-2]
             ex_diff = ex_now - ex_prev
             cols1[2].metric("원/달러 환율", f"{ex_now:,.2f}", f"{ex_diff:,.2f}")
         except: pass
@@ -120,12 +138,12 @@ while True:
             
             for idx, (name, sym) in enumerate(display_items.items()):
                 try:
-                    series = y_data[sym].dropna()
-                    current_val = series.iloc[-1]
-                    # 야후 파이낸스에서 전일 종가 기준 등락 계산
-                    prev_val = y_data[sym].iloc[0] 
-                    delta_val = current_val - prev_val
-                    delta_pct = (delta_val / prev_val) * 100
+                    current_val = y_live[sym].dropna().iloc[-1]
+                    # 어제 종가 데이터 활용 (nan 오류 해결)
+                    prev_close = y_data[sym].dropna().iloc[-2]
+                    
+                    delta_val = current_val - prev_close
+                    delta_pct = (delta_val / prev_close) * 100
                     
                     cols[idx % 3].metric(
                         label=name, 
@@ -136,9 +154,9 @@ while True:
                     cols[idx % 3].metric(label=name, value="대기 중")
 
     # --- 하단 갱신 상태 ---
-    now_str = get_kst_now().strftime('%Y-%m-%d %H:%M:%S')
-    m_status = "🟢 장중 실시간" if is_market_open() else "⚪ 장외 고정 데이터"
-    status_area.markdown(f"<div class='bottom-right-text'>{m_status} (갱신: {now_str} KST)</div>", unsafe_allow_html=True)
+    now_str = get_kst_now().strftime('%H:%M:%S')
+    m_status = "🟢 실시간" if is_market_open() else "⚪ 장외"
+    status_area.markdown(f"<div class='bottom-right-text'>{m_status} 갱신: {now_str}</div>", unsafe_allow_html=True)
     
     time.sleep(5)
     st.rerun()
