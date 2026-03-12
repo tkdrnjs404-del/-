@@ -7,7 +7,6 @@ import time
 # 1. 페이지 설정 및 다크 테마 디자인
 st.set_page_config(page_title="Real-time Dashboard", layout="wide")
 
-# CSS: 숫자 흰색 고정 및 가독성 향상
 st.markdown("""
     <style>
     .main { background-color: #0e1117; }
@@ -18,7 +17,6 @@ st.markdown("""
     }
     [data-testid="stMetricLabel"] {
         color: #AAAAAA !important;
-        font-size: 1.1rem !important;
     }
     div[data-testid="stMetric"] {
         background-color: #1c1f26;
@@ -29,20 +27,17 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-st.title("⚡ 실시간 시장 대시보드 (5초 주기)")
+st.title("⚡ 실시간 시장 대시보드")
 
-# 데이터 표시 공간
 container = st.container()
-
-# 하단 상태 표시 공간
 st.divider()
 status_area = st.empty() 
 
-# 티커 설정 (코스피 200, 코스닥 150 유지)
+# 티커 설정: 코스닥 150 심볼을 ^KQ150으로 변경하여 호환성 높임
 tickers = {
     "국내 지수 (대표 200/150)": {
         "코스피 200": "^KS200", 
-        "코스닥 150": "^KQS150", 
+        "코스닥 150": "^KQ150", # 이 부분이 수정되었습니다
         "원/달러 환율": "KRW=X"
     },
     "해외 지수": {
@@ -59,26 +54,18 @@ tickers = {
 
 while True:
     with container:
-        # 전체 티커 리스트 추출
-        all_symbols = [sym for group in tickers.values() for sym in group.values()]
-        
-        # 최신 데이터 다운로드 (속도를 위해 최근 2일 데이터만 호출)
-        data = yf.download(all_symbols, period="2d", interval="1m", progress=False)
-        
-        if not data.empty:
-            for category, items in tickers.items():
-                st.subheader(f"📍 {category}")
-                cols = st.columns(3)
-                for idx, (name, sym) in enumerate(items.items()):
-                    try:
-                        # 최신가 추출
-                        valid_series = data['Close'][sym].dropna()
-                        current_price = valid_series.iloc[-1]
-                        
-                        # 전일 종가 기준 변동폭 계산
-                        ticker_obj = yf.Ticker(sym)
-                        hist = ticker_obj.history(period="2d")
-                        prev_close = hist['Close'].iloc[-2]
+        for category, items in tickers.items():
+            st.subheader(f"📍 {category}")
+            cols = st.columns(3)
+            for idx, (name, sym) in enumerate(items.items()):
+                try:
+                    # 개별 티커별로 최신 데이터를 가져와서 오류 최소화
+                    t = yf.Ticker(sym)
+                    df = t.history(period="2d", interval="1m")
+                    
+                    if not df.empty:
+                        current_price = df['Close'].iloc[-1]
+                        prev_close = df['Close'].iloc[0] # 전일 혹은 시작가 대비
                         
                         delta = current_price - prev_close
                         delta_pct = (delta / prev_close) * 100
@@ -88,13 +75,13 @@ while True:
                             value=f"{current_price:,.2f}", 
                             delta=f"{delta:,.2f} ({delta_pct:.2f}%)"
                         )
-                    except:
-                        cols[idx % 3].metric(label=name, value="데이터 수신 중...")
+                    else:
+                        cols[idx % 3].metric(label=name, value="휴장 또는 점검")
+                except:
+                    cols[idx % 3].metric(label=name, value="연결 재시도 중")
         
-    # 하단 상태 업데이트 (갱신 문구 수정)
     now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     status_area.markdown(f"<p style='text-align: center; color: #666;'>🔄 5초 주기 자동 동기화 중... (마지막 갱신: {now})</p>", unsafe_allow_html=True)
     
-    # 5초 대기 (안정적인 데이터 수신을 위한 주기)
     time.sleep(5)
     st.rerun()
